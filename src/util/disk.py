@@ -75,8 +75,7 @@ class GzipDisk(Disk):
 
 
 def getCache(scope_str):
-    return FanoutCache('/home/himoza/Учеба/restaurant_project/ \
-                       table_classification/dataset/cache/' + scope_str,
+    return FanoutCache('./dataset/cache/' + scope_str,
                        disk=GzipDisk,
                        shards=64,
                        timeout=1,
