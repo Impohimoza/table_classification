@@ -74,6 +74,12 @@ class TableTrainingApp:
             type=int
         )
         parser.add_argument(
+            '--checkpoint-dir',
+            help='Dir for save best model',
+            default='./checkpoints',
+            type=str
+        )
+        parser.add_argument(
             '--tb-prefix',
             default='table',
             help="Data prefix to use for Tensorboard run.\
@@ -98,8 +104,21 @@ class TableTrainingApp:
         
         self.model = self.initModel()
         self.optimizer = self.initOptimizer()
+        
+        self.checkpoints_dir = self.cli_args.checkpoint_dir \
+            + f'/{self.cli_args.comment}'
+        self.best_loss = float('inf')
+        
+        os.makedirs(
+            self.checkpoints_dir,
+            exist_ok=True)
     
-    def initModel(self):
+    def initModel(self) -> TableModel:
+        """Function for load model
+
+        Returns:
+            TableModel: returns TableModel
+        """
         model = TableModel(
             conv_blocks_type=self.cli_args.conv_type,
             depth=self.cli_args.depth,
@@ -122,10 +141,20 @@ class TableTrainingApp:
             log.info(f"GPU Memory {context}: \
                 {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
     
-    def initOptimizer(self):
+    def initOptimizer(self) -> Adam:
+        """Function for return optimizer
+
+        Returns:
+            Adam: Adam optimizer
+        """
         return Adam(self.model.parameters(), lr=0.0001, weight_decay=1e-5)
     
-    def initTrainDl(self):
+    def initTrainDl(self) -> DataLoader:
+        """Function for make Train DataLoader (Tensor, Label)
+
+        Returns:
+            DataLoader: DataLoader(TableDataset)
+        """
         train_ds = TableDataset(
             val_stride=9,
             isValSet_bool=False,
@@ -143,7 +172,12 @@ class TableTrainingApp:
         
         return train_dl
     
-    def initValDl(self):
+    def initValDl(self) -> DataLoader:
+        """Function for make Validation DataLoader (Tensor, Label)
+
+        Returns:
+            DataLoader: DataLoader(TableDataset)
+        """
         val_ds = TableDataset(val_stride=9, isValSet_bool=True)
         
         batch_size = self.cli_args.batch_size
@@ -159,6 +193,8 @@ class TableTrainingApp:
         return val_dl
     
     def initTensorboardWriters(self):
+        """Initial Tensorboard
+        """
         if self.trn_writer is None:
             log_dir = os.path.join(
                 'runs',
@@ -174,9 +210,13 @@ class TableTrainingApp:
             )
     
     def main(self):
+        """Train algorithm
+        """
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
         train_dl = self.initTrainDl()
         val_dl = self.initValDl()
+        
+        best_model_path = ''
         
         for epoch_ndx in range(1, self.cli_args.epochs + 1):
             log.info("Epoch {} of {}, {}/{} batches of size {}*{}".format(
@@ -191,13 +231,30 @@ class TableTrainingApp:
             self.logMetrics(epoch_ndx, 'trn', trnMetrics_t)
             
             valMetrics_t = self.doValidation(epoch_ndx, val_dl)
-            self.logMetrics(epoch_ndx, 'val', valMetrics_t)
+            f1_metric_val = self.logMetrics(epoch_ndx, 'val', valMetrics_t)
+            
+            # Сохранение лучшей модели
+            current_val_los = valMetrics_t[METRICS_LOSS_NDX].mean()
+            if current_val_los < self.best_loss:
+                self.best_loss = current_val_los
+                best_model_path = self.save_checkpoint(
+                    epoch_ndx, current_val_los, f1_metric_val)
             
             if hasattr(self, 'trn_writer'):
                 self.trn_writer.close()
                 self.val_writer.close()
+        self.load_checkpoint(best_model_path)
     
-    def doTraining(self, epoch_ndx, train_dl: DataLoader):
+    def doTraining(self, epoch_ndx: int, train_dl: DataLoader) -> torch.Tensor:
+        """Model training step function
+
+        Args:
+            epoch_ndx (int): index epoch
+            train_dl (DataLoader): train dataloader
+
+        Returns:
+            torch.Tensor: metrics
+        """
         self.model.train()
         train_dl.dataset.shuffleSamples()
         trnMetrics_g = torch.zeros(
@@ -228,7 +285,16 @@ class TableTrainingApp:
         
         return trnMetrics_g.to('cpu')
     
-    def doValidation(self, epoch_ndx, val_dl: DataLoader):
+    def doValidation(self, epoch_ndx: int, val_dl: DataLoader) -> torch.Tensor:
+        """Validation step function
+
+        Args:
+            epoch_ndx (int): index epoch
+            val_dl (DataLoader): Validation DataLoader
+
+        Returns:
+            torch.Tensor: val metrics
+        """
         with torch.no_grad():
             self.model.eval()
             valMetrics_g = torch.zeros(
@@ -250,6 +316,17 @@ class TableTrainingApp:
         return valMetrics_g.to('cpu')
     
     def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics_g):
+        """Function calculate loss
+
+        Args:
+            batch_ndx (int): index batch
+            batch_tup (Tuple): (Tensor, Label)
+            batch_size (int): batch size
+            metrics_g (Tensor): tensor metrics
+
+        Returns:
+            int: Loss mean
+        """
         input_t, label_t = batch_tup
 
         input_g = input_t.to(self.device, non_blocking=True,
@@ -278,11 +355,23 @@ class TableTrainingApp:
 
     def logMetrics(
             self,
-            epoch_ndx,
-            mode_str,
-            metrics_t,
-            classificationThreshold=0.5,
-    ):
+            epoch_ndx: int,
+            mode_str: str,
+            metrics_t: torch.Tensor,
+            classificationThreshold: int = 0.5,
+    ) -> int:
+        """Log metrics write tensorboard
+
+        Args:
+            epoch_ndx (int): index epoch
+            mode_str (str): log mode (trn, val)
+            metrics_t (torch.Tensor): metrics
+            classificationThreshold (int, optional): classification threshold. Defaults to 0.5.
+
+        Returns:
+            int: f1 metrics
+        """
+
         self.initTensorboardWriters()
         log.info("E{} {}".format(
             epoch_ndx,
@@ -298,7 +387,7 @@ class TableTrainingApp:
         neg_count = int(negLabel_mask.sum())
         pos_count = int(posLabel_mask.sum())
 
-        trueNeg_count = neg_correct = int((negLabel_mask & negPred_mask).sum())
+        neg_correct = int((negLabel_mask & negPred_mask).sum())
         truePos_count = pos_correct = int((posLabel_mask & posPred_mask).sum())
 
         falsePos_count = neg_count - neg_correct
@@ -388,6 +477,52 @@ class TableTrainingApp:
                 self.totalTrainingSamples_count,
                 bins=bins,
             )
+        
+        return metrics_dict['pr/f1_score']
+
+    def save_checkpoint(self, epoch: int, loss: int, f1_metric: int) -> str:
+        """Save weights model
+
+        Args:
+            epoch (int): index epoch
+            loss (int): loss
+            f1_metric (int): f1 metrics
+
+        Returns:
+            str: Path to save model weights
+        """
+        
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss,
+            'best_loss': self.best_loss,
+        }
+        
+        filename = f'best_model_epoch_{epoch}_loss' \
+            + f'_{loss:.4f}_f1_{f1_metric:.4f}.pth'
+        
+        # Удаляем предыдущую лучшую модель
+        for f in os.listdir(self.checkpoints_dir):
+            if f.startswith('best_model'):
+                os.remove(os.path.join(self.checkpoints_dir, f))
+        best_model_path = os.path.join(self.checkpoints_dir, filename)
+        torch.save(checkpoint, best_model_path)
+        return best_model_path
+    
+    def load_checkpoint(self, checkpoint_path: str):
+        """Load weights model
+
+        Args:
+            checkpoint_path (str): path to save model weights
+        """
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        epoch = checkpoint.get('epoch', 0)
+        loss = checkpoint.get('best_loss', 0)
+        
+        log.info('Load best model E{}, {:.4f}'.format(epoch, loss))
 
 
 if __name__ == '__main__':

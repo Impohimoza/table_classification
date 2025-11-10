@@ -2,31 +2,45 @@ import math
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
-from .layers.blocks import SimpleBlock
+from .layers.blocks import SimpleBlock, BatchBlock, DropoutBlock
 
 
 class TableModel(nn.Module):
     def __init__(self,
                  img_size=(3, 512, 512),
-                 wf=7,
+                 wf=6,
                  depth=3,
                  conv_blocks_type='simple'):
         super().__init__()
-        assert conv_blocks_type in ['simple'], conv_blocks_type
+        assert conv_blocks_type in ['simple', 'dropout', 'batch'], conv_blocks_type
         
         prev_channels = img_size[0]
         
         self.batch_norm = nn.BatchNorm2d(3)
         
         self.conv_blocks = nn.ModuleList()
-        for i in range(depth):
-            self.conv_blocks.append(SimpleBlock(prev_channels, 2**(wf - i)))
-            prev_channels = 2**(wf - i)
+        if conv_blocks_type == 'simple':
+            for i in range(depth):
+                self.conv_blocks.append(SimpleBlock(prev_channels,
+                                                    2**(wf - i)))
+                prev_channels = 2**(wf - i)
+        if conv_blocks_type == 'batch':
+            for i in range(depth):
+                self.conv_blocks.append(BatchBlock(prev_channels, 2**(wf - i)))
+                prev_channels = 2**(wf - i)
+        if conv_blocks_type == 'dropout':
+            for i in range(depth):
+                self.conv_blocks.append(DropoutBlock(prev_channels,
+                                                     2**(wf - i)))
+                prev_channels = 2**(wf - i)
         
         out_param = self.calculate_count_param(img_size, depth, prev_channels)
-        self.head_batch_norm = nn.BatchNorm1d(out_param)
-        self.head_linear = nn.Linear(out_param, 2)
+        self.head_batch_norm1 = nn.BatchNorm1d(out_param)
+        self.head_linear = nn.Linear(out_param, out_param // 2)
+        self.head_batch_norm2 = nn.BatchNorm1d(out_param // 2)
+        self.head_linear2 = nn.Linear(out_param // 2, 2)
         self._init_weights()
         
     def calculate_count_param(self, img_size, depth, last_channels):
@@ -54,8 +68,10 @@ class TableModel(nn.Module):
             x = conv(x)
         
         conv_flat = torch.flatten(x, 1)
-        batch_norm_output = self.head_batch_norm(conv_flat)
-        linear_output = self.head_linear(batch_norm_output)
+        batch_norm_output = self.head_batch_norm1(conv_flat)
+        linear_output = torch.relu(self.head_linear(batch_norm_output))
+        linear_output = self.head_batch_norm2(linear_output)
+        linear_output = self.head_linear2(linear_output)
         
         return linear_output, torch.softmax(linear_output, 1)
         
