@@ -44,8 +44,9 @@ class TableModel(nn.Module):
         self._init_weights()
         
     def calculate_count_param(self, img_size, depth, last_channels):
-        out_size = (img_size[1] * img_size[2] * last_channels)
-        return int(out_size / 2**(2 * depth))
+        out_r = int(img_size[1] / 2**depth)
+        out_c = int(img_size[2] / 2**depth)
+        return out_r * out_c * last_channels
 
     def _init_weights(self):
         for m in self.modules():
