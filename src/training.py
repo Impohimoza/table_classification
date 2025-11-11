@@ -13,7 +13,7 @@ import numpy as np
 from .data.dataset import TableDataset
 from .util.logconfig import logging
 from .util.util import enumerateWithEstimate
-from .models.model import TableModel
+from .models.model import TableModel, MobileNetWrapper
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -30,6 +30,12 @@ class TableTrainingApp:
             sys_argv = sys.argv[1:]
         
         parser = argparse.ArgumentParser()
+        parser.add_argument(
+            '--model-type',
+            help='pre training or custom model',
+            default='custom',
+            type=str
+        )
         parser.add_argument(
             '--num-workers',
             help='Number of worker processes \
@@ -48,6 +54,12 @@ class TableTrainingApp:
             help='Number of epochs to train',
             default=20,
             type=int
+        )
+        parser.add_argument(
+            '--lr',
+            help='Learning rate',
+            default=0.001,
+            type=float
         )
         parser.add_argument(
             '--balanced',
@@ -113,16 +125,19 @@ class TableTrainingApp:
             self.checkpoints_dir,
             exist_ok=True)
     
-    def initModel(self) -> TableModel:
+    def initModel(self) -> nn.Module:
         """Function for load model
 
         Returns:
-            TableModel: returns TableModel
+            nn.Module: returns Model
         """
-        model = TableModel(
-            conv_blocks_type=self.cli_args.conv_type,
-            depth=self.cli_args.depth,
-            img_size=(3, self.cli_args.img_size, self.cli_args.img_size),)
+        if self.cli_args.model_type == 'custom':
+            model = TableModel(
+                conv_blocks_type=self.cli_args.conv_type,
+                depth=self.cli_args.depth,
+                img_size=(3, self.cli_args.img_size, self.cli_args.img_size),)
+        elif 'pretraining':
+            model = MobileNetWrapper()
         if self.use_cuda:
             log.info("Using CUDA; {} devices."
                      .format(torch.cuda.device_count()))
@@ -147,7 +162,9 @@ class TableTrainingApp:
         Returns:
             Adam: Adam optimizer
         """
-        return Adam(self.model.parameters(), lr=0.0001, weight_decay=1e-5)
+        return Adam(self.model.parameters(),
+                    lr=self.cli_args.lr,
+                    weight_decay=1e-5)
     
     def initTrainDl(self) -> DataLoader:
         """Function for make Train DataLoader (Tensor, Label)
@@ -158,7 +175,8 @@ class TableTrainingApp:
         train_ds = TableDataset(
             val_stride=9,
             isValSet_bool=False,
-            ratio_int=int(self.cli_args.balanced))
+            ratio_int=int(self.cli_args.balanced),
+            img_size=(self.cli_args.img_size, self.cli_args.img_size))
         
         batch_size = self.cli_args.batch_size
         if self.use_cuda:

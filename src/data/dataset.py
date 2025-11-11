@@ -90,7 +90,8 @@ class TableDataset(Dataset):
                  val_stride=0,
                  isValSet_bool: str = None,
                  ratio_int=0,
-                 img_name: str = None):
+                 img_name: str = None,
+                 img_size=(280, 280)):
         """
         Class for work with dataset Table
         Args:
@@ -104,6 +105,7 @@ class TableDataset(Dataset):
                 from a single image. Defaults to None.
         """
         self.ratio_int = ratio_int
+        self.img_size = img_size
         self.tableInfo_list = copy.copy(getTableInfoList())
         
         if img_name:
@@ -152,8 +154,11 @@ class TableDataset(Dataset):
             tableInfo_tup = self.tableInfo_list[ndx]
         
         img_a = getTableImage(tableInfo_tup.img_name)
-        to_tensor = transforms.ToTensor()
-        img_t = to_tensor(img_a).to(dtype=torch.float32)
+        data_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize(self.img_size),
+        ])
+        img_t = data_transform(img_a).to(dtype=torch.float32)
         
         pos_t = torch.tensor([
             not tableInfo_tup.isDirty,
