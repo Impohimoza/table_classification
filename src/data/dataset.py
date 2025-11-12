@@ -22,7 +22,7 @@ TableInfoTuple = namedtuple(
     'img_name, isDirty'
 )
 
-DATASET_DIR = 'dataset'
+DATASET_DIR = 'dataset/train'
 img_cache = getCache('img_cache')
 
 
@@ -36,10 +36,8 @@ def getTableInfoList() -> TableInfoTuple:
     """
     imgPath_list = glob.glob(DATASET_DIR + '/*/*.jpg')
     tableInfo_list = [TableInfoTuple(os.path.splitext(img_path)[0]
-                                     .split('/')[-1], True)
-                      if img_path.split('/')[-2] == 'dirty'
-                      else TableInfoTuple(os.path.splitext(img_path)[0]
-                                          .split('/')[-1], False)
+                                     .split('/')[-1],
+                                     img_path.split('/')[-2] == 'dirty')
                       for img_path in imgPath_list]
     random.shuffle(tableInfo_list)
     return tableInfo_list
@@ -135,7 +133,7 @@ class TableDataset(Dataset):
     
     def __len__(self):
         if self.ratio_int:
-            return 3000
+            return 5000
         else:
             return len(self.tableInfo_list)
     

@@ -14,6 +14,7 @@ from .data.dataset import TableDataset
 from .util.logconfig import logging
 from .util.util import enumerateWithEstimate
 from .models.model import TableModel, MobileNetWrapper
+from .models.augmentation import TableAugmentation
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -114,7 +115,7 @@ class TableTrainingApp:
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
         
-        self.model = self.initModel()
+        self.model, self.augmentation_model = self.initModel()
         self.optimizer = self.initOptimizer()
         
         self.checkpoints_dir = self.cli_args.checkpoint_dir \
@@ -125,7 +126,7 @@ class TableTrainingApp:
             self.checkpoints_dir,
             exist_ok=True)
     
-    def initModel(self) -> nn.Module:
+    def initModel(self) -> tuple[nn.Module, nn.Module]:
         """Function for load model
 
         Returns:
@@ -136,8 +137,12 @@ class TableTrainingApp:
                 conv_blocks_type=self.cli_args.conv_type,
                 depth=self.cli_args.depth,
                 img_size=(3, self.cli_args.img_size, self.cli_args.img_size),)
+            
         elif 'pretraining':
             model = MobileNetWrapper()
+        
+        augmentation_model = TableAugmentation()
+        
         if self.use_cuda:
             log.info("Using CUDA; {} devices."
                      .format(torch.cuda.device_count()))
@@ -145,9 +150,12 @@ class TableTrainingApp:
             
             if torch.cuda.device_count() > 1:
                 model = nn.DataParallel(model)
+                augmentation_model = nn.DataParallel(augmentation_model)
             model = model.to(self.device)
+            augmentation_model = augmentation_model.to(self.device)
+
             self.log_memory_usage("After model loading")
-        return model
+        return model, augmentation_model
     
     def log_memory_usage(self, context=""):
         if self.use_cuda:
@@ -350,6 +358,9 @@ class TableTrainingApp:
         input_g = input_t.to(self.device, non_blocking=True,
                              memory_format=torch.channels_last)
         label_g = label_t.to(self.device, non_blocking=True)
+        
+        if self.model.training:
+            input_g = self.augmentation_model(input_g)
 
         logits_g, probability_g = self.model(input_g)
 
