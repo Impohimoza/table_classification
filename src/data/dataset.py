@@ -23,18 +23,19 @@ TableInfoTuple = namedtuple(
 )
 
 DATASET_DIR = 'dataset/train'
+TEST_DATASET_DIR = 'dataset/valid'
 img_cache = getCache('img_cache')
 
 
 @functools.lru_cache(1)
-def getTableInfoList() -> TableInfoTuple:
+def getTableInfoList(data_dir: str) -> TableInfoTuple:
     """
     Function to retrieve information from a table dataset
 
     Returns:
         TableInfoTuple: Tuple ('img_name, isDirty')
     """
-    imgPath_list = glob.glob(DATASET_DIR + '/*/*.jpg')
+    imgPath_list = glob.glob(data_dir + '/*/*.jpg')
     tableInfo_list = [TableInfoTuple(os.path.splitext(img_path)[0]
                                      .split('/')[-1],
                                      img_path.split('/')[-2] == 'dirty')
@@ -44,8 +45,8 @@ def getTableInfoList() -> TableInfoTuple:
 
 
 class Table:
-    def __init__(self, img_name: str):
-        img_path = glob.glob(DATASET_DIR + f'/*/{img_name}.jpg')
+    def __init__(self, data_dir: str, img_name: str):
+        img_path = glob.glob(data_dir + f'/*/{img_name}.jpg')
         
         table_img = cv2.imread(img_path[0])
         table_img = cv2.cvtColor(table_img, cv2.COLOR_BGR2RGB)
@@ -63,12 +64,12 @@ class Table:
 
 
 @functools.lru_cache(1, typed=True)
-def getTable(img_name: str) -> Table:
-    return Table(img_name)
+def getTable(data_dir: str, img_name: str) -> Table:
+    return Table(data_dir, img_name)
 
 
 @img_cache.memoize(typed=True)
-def getTableImage(img_name: str) -> np.ndarray:
+def getTableImage(data_dir: str, img_name: str) -> np.ndarray:
     """
     Function corresponds to function getTableImage in class Table.
     Only with results caching
@@ -78,7 +79,7 @@ def getTableImage(img_name: str) -> np.ndarray:
     Returns:
         np.ndarray: representation of the image in np.ndarray
     """
-    table = getTable(img_name)
+    table = getTable(data_dir, img_name)
     img_a = table.getTableImage()
     return img_a
 
@@ -87,6 +88,7 @@ class TableDataset(Dataset):
     def __init__(self,
                  val_stride=0,
                  isValSet_bool: str = None,
+                 isTest_bool: bool = False,
                  ratio_int=0,
                  img_name: str = None,
                  img_size=(280, 280)):
@@ -102,9 +104,13 @@ class TableDataset(Dataset):
             img_name (_type_, optional): Argument for obtaining a dataset \
                 from a single image. Defaults to None.
         """
+        self.data_dir = TEST_DATASET_DIR if isTest_bool else DATASET_DIR
         self.ratio_int = ratio_int
         self.img_size = img_size
-        self.tableInfo_list = copy.copy(getTableInfoList())
+        if not isTest_bool:
+            self.tableInfo_list = copy.copy(getTableInfoList(data_dir=DATASET_DIR))
+        else:
+            self.tableInfo_list = copy.copy(getTableInfoList(data_dir=TEST_DATASET_DIR))
         
         if img_name:
             self.tableInfo_list = [
@@ -151,7 +157,7 @@ class TableDataset(Dataset):
         else:
             tableInfo_tup = self.tableInfo_list[ndx]
         
-        img_a = getTableImage(tableInfo_tup.img_name)
+        img_a = getTableImage(self.data_dir, tableInfo_tup.img_name)
         data_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Resize(self.img_size),

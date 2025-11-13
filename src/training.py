@@ -117,6 +117,7 @@ class TableTrainingApp:
         
         self.model, self.augmentation_model = self.initModel()
         self.optimizer = self.initOptimizer()
+        self.test_dl = self.initTestDl()
         
         self.checkpoints_dir = self.cli_args.checkpoint_dir \
             + f'/{self.cli_args.comment}'
@@ -205,6 +206,26 @@ class TableTrainingApp:
             DataLoader: DataLoader(TableDataset)
         """
         val_ds = TableDataset(val_stride=9, isValSet_bool=True)
+        
+        batch_size = self.cli_args.batch_size
+        if self.use_cuda:
+            batch_size *= torch.cuda.device_count()
+        
+        val_dl = DataLoader(
+            val_ds,
+            batch_size=batch_size,
+            num_workers=self.cli_args.num_workers,
+        )
+        
+        return val_dl
+
+    def initTestDl(self) -> DataLoader:
+        """Function for make Test DataLoader (Tensor, Label)
+
+        Returns:
+            DataLoader: DataLoader(TableDataset)
+        """
+        val_ds = TableDataset(isTest_bool=True)
         
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
@@ -552,6 +573,23 @@ class TableTrainingApp:
         loss = checkpoint.get('best_loss', 0)
         
         log.info('Load best model E{}, {:.4f}'.format(epoch, loss))
+    
+    def test_model(self):
+        self.model.eval()
+        labels = []
+        preds = []
+        batch_iter = enumerateWithEstimate(
+            self.test_dl,
+            "Test",
+            start_ndx=self.test_dl.num_workers
+        )
+        for batch_ndx, batch_tup in batch_iter:
+            input_t, label = batch_tup[0], batch_tup[1]
+            for i in range(0 , len(label)):
+                labels.append(int(torch.argmax(label[i])))
+                pred = self.model(input_t[i].unsqueeze(0).to(self.device))
+                preds.append(int(torch.argmax(pred[1])))
+        return labels, preds
 
 
 if __name__ == '__main__':
