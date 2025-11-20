@@ -71,7 +71,7 @@ class TableModel(nn.Module):
         
         conv_flat = torch.flatten(x, 1)
         # batch_norm_output = self.head_batch_norm1(conv_flat)
-        out = F.dropout2d(conv_flat, 0.3)
+        out = F.dropout2d(conv_flat, 0.3, training=self.training)
         linear_output = self.head_linear(out)
         # linear_output = self.head_batch_norm2(linear_output)
         # linear_output = self.head_linear2(linear_output)
